@@ -18,6 +18,13 @@
 }
 .hq-loading > * { animation: hq-loading-in .5s .2s ease-out both; }
 .hq-loading.is-done { opacity: 0; }
+.hq-loading.is-error {
+  width: min(280px, 78vw); padding: 16px 18px; border-radius: 16px; text-align: center;
+  color: #1d1d1f; background: rgba(255, 255, 255, .92);
+  box-shadow: 0 8px 28px rgba(18, 22, 34, .16);
+}
+.hq-loading.is-error .hq-loading-label { white-space: normal; line-height: 1.45; font-weight: 600; }
+.hq-loading.is-error > * { animation: none; }
 .hq-loading-track {
   position: relative; display: block; width: 112px; height: 2px; border-radius: 1px; overflow: hidden;
   background: rgba(110, 110, 115, .16); background: color-mix(in srgb, currentColor 16%, transparent);

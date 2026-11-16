@@ -431,6 +431,7 @@ function own(el) { U.owned.push(el); return el; }
 export function initUI(handlers) {
   if (U) {
     if (U.keyHandler) document.removeEventListener('keydown', U.keyHandler);
+    if (U.floorKeyHandler) document.removeEventListener('keydown', U.floorKeyHandler);
     if (U.onResize) removeEventListener('resize', U.onResize);
     if (U.ro) U.ro.disconnect();
     if (U.ro2) U.ro2.disconnect();
@@ -470,6 +471,9 @@ export function initUI(handlers) {
     if (U.last.opts.selectedBot && U.h.onSelectBot) U.h.onSelectBot(null);
   };
   document.addEventListener('keydown', U.keyHandler);
+  // On the document, not the floor menu: arrows work before anything has been clicked.
+  U.floorKeyHandler = onFloorKey;
+  document.addEventListener('keydown', U.floorKeyHandler);
 
   // relative times ("12 min ago", "in 3 h") move on even when no new state arrives
   U.timer = setInterval(() => {
@@ -535,8 +539,7 @@ function buildFloors(root) {
   const count = h('b', { class: 'bhq-num' });
   const fscroll = h('div', { class: 'bhq-fscroll' }, shaft);
   root.append(h('div', { class: 'bhq-fhead' }, h('span', { text: 'Floors' }), count), fscroll);
-  root.addEventListener('keydown', onFloorKey);
-  U.fl = { root, shaft, car, count, fscroll, carTop: null, carH: null, carShown: false, ready: false };
+  U.fl = { root, shaft, car, count, fscroll, carTop: null, carH: null, carShown: false, ready: false, shownId: null };
   if (typeof ResizeObserver === 'function') {
     U.ro = new ResizeObserver(() => placeCar());
     U.ro.observe(shaft);
@@ -561,27 +564,27 @@ function makeFloor(id) {
   return { btn, num, name, dots, count, dotEls: [] };
 }
 
-// Desktop keyboard: arrows move through the menu (and Left/Right along the phone chips). Home/End jump.
+// The menu lists the highest floor first. ArrowUp / ArrowLeft go up the tower, ArrowDown / ArrowRight go down.
+// Home is the street level, End is the roof. The listener is on document so it works before the first click.
 function onFloorKey(e) {
-  if (e.altKey || e.ctrlKey || e.metaKey || e.defaultPrevented) return;
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
   const t = e.target;
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (!U || !U.fl) return;
   const buttons = [...U.fl.root.querySelectorAll('.bhq-floor')];
   if (!buttons.length) return;
-  const focused = buttons.findIndex((b) => b === document.activeElement);
-  const active = buttons.findIndex((b) => b.getAttribute('aria-current') === 'true');
-  const i = focused >= 0 ? focused : active;
   let next = -1;
-  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = i < 0 ? 0 : Math.min(buttons.length - 1, i + 1);
-  else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = i < 0 ? buttons.length - 1 : Math.max(0, i - 1);
-  else if (e.key === 'Home') next = 0;
-  else if (e.key === 'End') next = buttons.length - 1;
+  const active = buttons.findIndex((b) => b.getAttribute('aria-current') === 'true');
+  const i = active;
+  if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = i < 0 ? 0 : Math.max(0, i - 1);
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = i < 0 ? buttons.length - 1 : Math.min(buttons.length - 1, i + 1);
+  else if (e.key === 'Home') next = buttons.length - 1;
+  else if (e.key === 'End') next = 0;
   else return;
   e.preventDefault();
   const btn = buttons[next];
-  if (!btn) return;
-  btn.focus();
-  if (U.h.onSelectFloor) U.h.onSelectFloor(btn.dataset.id);
+  if (!btn || !U.h.onSelectFloor) return;
+  U.h.onSelectFloor(btn.dataset.id);
 }
 
 /* ------------------------------------------------------------------ build: panel (floor team / bot card) */
@@ -1262,6 +1265,24 @@ function renderFloors(state, o) {
   reconcile(f.shaft, list.map((x) => U.floors.get(x.id).btn), 1); // child 0 is the car
   placeCar();
   centerChip(activeId);
+  if (f.shownId !== activeId) { f.shownId = activeId; revealFloor(activeId); }
+}
+
+// Keep the current level inside the menu. Does not move the page itself.
+function revealFloor(activeId) {
+  const r = activeId && U.floors.get(activeId);
+  const sc = U.fl && U.fl.fscroll;
+  if (!r || !sc) return;
+  const b = r.btn;
+  if (U.phone) {
+    const left = b.offsetLeft, right = left + b.offsetWidth;
+    if (left < sc.scrollLeft) sc.scrollLeft = left;
+    else if (right > sc.scrollLeft + sc.clientWidth) sc.scrollLeft = right - sc.clientWidth;
+    return;
+  }
+  const top = b.offsetTop, bot = top + b.offsetHeight;
+  if (top < sc.scrollTop) sc.scrollTop = top;
+  else if (bot > sc.scrollTop + sc.clientHeight) sc.scrollTop = bot - sc.clientHeight;
 }
 
 // phones: the floors are a scrolling chip row; bring the active chip to the middle when the floor changes

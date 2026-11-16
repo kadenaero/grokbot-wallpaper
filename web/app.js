@@ -2,6 +2,7 @@
 // With #<topic> in the link it reads the user's bots from their channel instead (feed.js, lib/feedbase.js): no server.
 // Without either (static preview) it runs on web/data/demo-state.json with a local simulation.
 import { initScene, renderScene, zoom, focusBot } from './scene/scene.js';
+import { floorsWithSkyline } from './scene/skyline.js';
 import { initSound, sfx } from './audio/sound.js';
 
 const POLL_MS = 1000;
@@ -54,10 +55,16 @@ function select(id) {
   }
 }
 
+// Team floors plus the empty stories and the roof drawn above them.
+function shownFloors() {
+  return floorsWithSkyline(state?.floors);
+}
+
 function setFloor(id, keepSelection = false) {
-  if (!state?.floors.some((f) => f.id === id)) return;
+  const floors = shownFloors();
+  if (!floors.some((f) => f.id === id)) return;
   if (id !== view.currentFloor) {                        // the elevator's chime rings higher on higher floors
-    const order = [...state.floors].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).findIndex((f) => f.id === id);
+    const order = [...floors].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).findIndex((f) => f.id === id);
     sfx.floor(order);
   }
   view.currentFloor = id;
@@ -75,7 +82,7 @@ function pickDefaultFloor() {
   }
   let saved = null;
   try { saved = localStorage.getItem('bothq.floor'); } catch {}
-  if (saved && state.floors.some((f) => f.id === saved)) return saved;
+  if (saved && shownFloors().some((f) => f.id === saved)) return saved;
   return fullest();
 }
 
@@ -84,7 +91,7 @@ const cycleSec = WALLPAPER ? Number(params.get('cycle')) : 0;
 if (cycleSec >= 5) {
   setInterval(() => {
     if (document.hidden || !state || state.floors.length < 2) return;
-    const floors = [...state.floors].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const floors = shownFloors().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     const i = floors.findIndex((f) => f.id === view.currentFloor);
     setFloor(floors[(i + 1) % floors.length].id);
   }, cycleSec * 1000);
@@ -92,10 +99,11 @@ if (cycleSec >= 5) {
 
 function render() {
   if (!state) return;
-  if (!view.currentFloor || !state.floors.some((f) => f.id === view.currentFloor)) view.currentFloor = pickDefaultFloor();
+  const shown = { ...state, floors: shownFloors() };
+  if (!view.currentFloor || !shown.floors.some((f) => f.id === view.currentFloor)) view.currentFloor = pickDefaultFloor();
   if (view.selectedBot && !state.bots[view.selectedBot]) view.selectedBot = null;
-  renderScene(state, view);
-  ui.renderUI(state, view);
+  renderScene(shown, view);
+  ui.renderUI(shown, view);
   if (!WALLPAPER) soundStatusChanges();
 }
 
