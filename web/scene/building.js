@@ -1,6 +1,7 @@
 // The building stack (CONTRACT v2.4/v2.5): floors sorted by order, the active floor open, floors below closed,
-// floors above slid up out of the frame (opaque, never faded), roof on top, elevator shaft + cabin. The stack is
-// exactly the user's floors (one per bot group) and stands on the studio ground at floor 1: nothing below it. Everything that
+// floors above kept as a slender glass shaft (so the tower stays visible), roof on top, elevator shaft + cabin.
+// The stack is the user's floors plus the empty stories the page adds above them, on the studio ground at floor 1.
+// Everything that
 // moves is a critically damped spring that can be re-targeted mid-flight (floor switch = elevator ride). The
 // open/closed swap of two floors happens in one frame at the peak of a short canvas blur ("whoosh"), so big floors
 // never cross-fade (that was hazy and heavy: every material went through the transparent pass).
@@ -10,7 +11,15 @@ import { FLOOR_STEP, SLAB, SHAFT_POS } from './office.js';
 import { WallDisplays } from './walls.js';
 import { floorStyles, applyFloorStyle, styleObjects, styleNightMaps } from './floorstyle.js';
 
-const LIFT = 20;                        // how far upper floors slide up, out of the frame (m)
+// Floors above the one you're on used to slide 20 m out of frame, so the building was only as tall as the
+// floors below the camera. They now stay stacked: a narrow shaft behind the open floor, plus the roof.
+const DROP = 7;                         // how far a floor falls in on load (m), not how the tower is hidden
+const OPEN_CLEAR = 3.05;               // room above a floor's walking surface so the open walls are not sliced
+const CROWN_STEP = FLOOR_STEP;         // same module height, so closed storeys do not intersect
+const SHAFT_SX = 0.62;                 // slender in plan; the open floor stays full size so the desks still read
+const SHAFT_SZ = 0.7;
+const SHAFT_SHIFT_X = 8 * (1 - SHAFT_SX);   // keep the elevator edge ( +x ) where the shaft is
+const SHAFT_SHIFT_Z = -6 * (1 - SHAFT_SZ);  // keep the back wall, so the tower sits behind the cutaway
 const SWAP_AT = 0.14;                   // s after a switch starts: blur peak, open/closed swap
 const BLUR_TAIL = 0.4;                  // s for the blur to clear after the swap
 const BLUR_PX = 7;
@@ -328,16 +337,29 @@ export class Building {
     this.slots.forEach((s, i) => { s.showOpen = i === this.activeIndex && !!s.open; });
   }
 
+  // Walking-surface height of slot `index` while `a` is the open floor. Stories above stack
+  // clear of the open walls; stories at and below keep the regular module step.
+  plateY(index, a) {
+    if (a < 0) return Math.max(0, index) * FLOOR_STEP;
+    if (index > a) return a * FLOOR_STEP + OPEN_CLEAR + (index - a - 1) * CROWN_STEP;
+    return index * FLOOR_STEP;
+  }
+
+  crownTop(a) {
+    const n = this.slots.length;
+    if (a < 0 || !n) return FLOOR_STEP;
+    return this.plateY(n - 1, a) + CROWN_STEP;
+  }
+
   retarget(intro) {
     const a = this.activeIndex;
     if (a < 0) return;
     this.slots.forEach((s, i) => {
-      if (i <= a) s.lift.to(0, intro ? 0.05 + (a - i) * 0.08 : 0);
-      else s.lift.to(1);
+      s.lift.to(0, intro ? 0.05 + Math.abs(a - i) * 0.035 : 0);
     });
-    this.roofLift.to(1);
+    this.roofLift.to(0, intro ? 0.2 : 0);
     this.cabinY.to(a * FLOOR_STEP);
-    this.shaftTop.to(Math.min(this.slots.length * FLOOR_STEP, a * FLOOR_STEP + CAB_H + 0.35));
+    this.shaftTop.to(this.crownTop(a));
   }
 
   acquireOpen(slot) {
@@ -397,28 +419,34 @@ export class Building {
 
     for (const s of this.slots) {
       s.lift.step(dt);
-      const off = s.lift.x * (LIFT + Math.max(0, s.index - a) * FLOOR_STEP);
-      const inView = off < LIFT * 0.8;
-      const y = s.index * FLOOR_STEP + off;
-      s.closed.root.position.y = y;
-      s.closed.setShown(inView && !s.showOpen);
+      const y = this.plateY(s.index, a) + s.lift.x * DROP;
+      // Closed storeys are the slender shaft (shifted toward the elevator and the back wall).
+      // The open floor stays full size, in front of that shaft, so the desks stay in frame.
+      s.closed.root.position.set(SHAFT_SHIFT_X, y, SHAFT_SHIFT_Z);
+      s.closed.root.scale.set(SHAFT_SX, 1, SHAFT_SZ);
+      s.closed.setShown(!s.showOpen);
       if (s.open) {
-        s.open.root.position.y = y;
-        s.open.setShown(inView && s.showOpen);
+        const openY = (s.index > a ? this.plateY(s.index, a) : s.index * FLOOR_STEP) + s.lift.x * DROP;
+        // Empty stories and the roof stay inside the slender shaft. A team floor opens full size.
+        const slim = String(s.id).startsWith('hq-sky');
+        s.open.root.position.set(slim ? SHAFT_SHIFT_X : 0, openY, slim ? SHAFT_SHIFT_Z : 0);
+        s.open.root.scale.set(slim ? SHAFT_SX : 1, 1, slim ? SHAFT_SZ : 1);
+        s.open.setShown(s.showOpen);
         if (s.open.alpha) this.updateOpen(s, dt, nowMs, night);
       }
     }
 
     this.roofLift.step(dt);
-    const roff = this.roofLift.x * (LIFT + Math.max(0, N - a) * FLOOR_STEP);
-    this.roof.root.position.y = N * FLOOR_STEP - SLAB + roff;
-    this.roof.setShown(roff < LIFT * 0.8);
+    const roofY = (a < 0 ? N * FLOOR_STEP : this.crownTop(a)) - SLAB + this.roofLift.x * DROP;
+    this.roof.root.position.set(SHAFT_SHIFT_X, roofY, SHAFT_SHIFT_Z);
+    this.roof.root.scale.set(SHAFT_SX, 1, SHAFT_SZ);
+    this.roof.setShown(true);
 
     this.cabinY.step(dt);
     this.shaftTop.step(dt);
     const act = this.slots[a];
     if (this.introDrop && (!act || (act.lift.x < 1e-3 && act.lift.pending === null))) this.introDrop = false;
-    const drop = this.introDrop ? act.lift.x * LIFT : 0;
+    const drop = this.introDrop ? act.lift.x * DROP : 0;
     this.cabin.root.position.y = this.cabinY.x + drop;
     const bottom = -SLAB, top = Math.max(bottom + 0.1, this.shaftTop.x);
     this.shaft.root.position.y = bottom + drop;

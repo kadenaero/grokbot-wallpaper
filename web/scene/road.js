@@ -1,5 +1,5 @@
-// A street in front of the open floor: two lanes of CSS cars, positioned from the camera each frame so the
-// road stays next to the building (not on the desks). pointer-events stay off, so it never takes a click.
+// A street at the foot of the tower (y = 0): two lanes of CSS cars. It stays on the ground when the
+// camera rides up the building. pointer-events stay off, so it never takes a click.
 // prefers-reduced-motion parks the cars (scene.css).
 import * as THREE from 'three';
 

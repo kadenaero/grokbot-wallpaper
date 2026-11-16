@@ -20,7 +20,7 @@ import { createRoad } from './road.js';
 const ASSETS = '../assets';
 const ISO_DIR = new THREE.Vector3(1, 1, 1).normalize();
 const HOME = { x: -0.4, y: -0.3, z: 0.3 };             // camera target relative to the active floor's surface
-const VIEW_SPAN = { w: 35, h: 22 };                 // meters visible at zoom 1 (the stack + the white air around it)
+const VIEW_SPAN = { w: 35, h: 28 };                 // meters visible at zoom 1 (the tower above the open floor, and the street)
 const PHONE_SPAN_W = 29.5;                          // m across a phone's scene box: the floor + shaft fill ~90 % of the screen
 const ZOOM = { min: 0.75, max: 3, focus: 2 };
 const UI_LEFT = 230, UI_RIGHT = 360;                   // glass panels the building must not hide behind
@@ -50,6 +50,7 @@ let hoveredId = null, pointerDirty = false, drag = null;
 const touches = new Map();
 let pinch = null;
 let introDone = false, switchedAt = 0, nowSec = 0, settledOnce = false;
+let loadTimer = 0;
 let loadingEl = null;
 // Debug/test switches: ?floor=<id> forces the active floor, ?from=<id> starts there first, ?intro=0 skips the load
 // animation, ?hold=<s> fast-forwards that long after the (last) switch and freezes time, ?cam=x,z,zoom snaps the camera.
@@ -86,7 +87,24 @@ export function initScene(el, cbs = {}) {
     container.append(loadingEl);
   }
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+  if (!webglAvailable()) {
+    failLoader('This browser can\u2019t show the 3D office. The floors and the activity feed still work.');
+    return;
+  }
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false });
+  } catch (err) {
+    console.warn('[scene] WebGL unavailable:', err && err.message);
+    failLoader('This browser can\u2019t show the 3D office. The floors and the activity feed still work.');
+    return;
+  }
+  loadTimer = setTimeout(() => {
+    failLoader('The 3D office didn\u2019t finish starting. The floors and the activity feed still work.');
+  }, 30000);
+  renderer.domElement.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    failLoader('The 3D view stopped. Reload the page to open the office again. The floors and the activity feed still work.');
+  });
   // the post chain (MSAA, half-float) is capped at 1.5x: soft by design, and it keeps VRAM and fill cost sane
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -281,10 +299,38 @@ function switchFloor(id, first) {
   if (first) { building.prewarm(camera); hideLoader(); }
 }
 
+function webglAvailable() {
+  try {
+    const c = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext && (c.getContext('webgl2') || c.getContext('webgl')));
+  } catch {
+    return false;
+  }
+}
+
+function failLoader(message) {
+  if (loadTimer) { clearTimeout(loadTimer); loadTimer = 0; }
+  if (!loadingEl) {
+    loadingEl = document.createElement('div');
+    loadingEl.className = 'hq-loading';
+    loadingEl.setAttribute('role', 'status');
+    loadingEl.innerHTML = '<span class="hq-loading-label"></span>';
+    container?.append(loadingEl);
+  }
+  loadingEl.classList.add('is-error');
+  loadingEl.classList.remove('is-done');
+  const label = loadingEl.querySelector('.hq-loading-label');
+  if (label) label.textContent = message;
+  const track = loadingEl.querySelector('.hq-loading-track');
+  if (track) track.remove();
+}
+
 function hideLoader() {
   const el = loadingEl;
   if (!el) return;
+  if (loadTimer) { clearTimeout(loadTimer); loadTimer = 0; }
   loadingEl = null;
+  el.classList.remove('is-error');
   el.classList.add('is-done');
   setTimeout(() => el.remove(), 450);
 }
@@ -642,7 +688,7 @@ function frame(t) {
   }
   stepEffects(dt);
 
-  if (road && building) road.update(camera, building.activeY, renderer.domElement.clientWidth, renderer.domElement.clientHeight);
+  if (road && building) road.update(camera, 0, renderer.domElement.clientWidth, renderer.domElement.clientHeight);
   if (post) {
     focusV.set(0, (building ? building.cabinY.x : 0) + 0.7, 0).project(camera);
     post.render(clamp(focusV.y * 0.5 + 0.5, 0, 1), dt, clamp(1.5 / camera.zoom, 0.25, 1));
