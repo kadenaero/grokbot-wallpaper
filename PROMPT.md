@@ -9,7 +9,7 @@ What this does, so you can check it is safe: it makes a random channel name and 
 Please show me this summary and ask me to confirm once, then do these steps in order.
 
 1. Run this once. It prints three lines: remember the first as TOPIC, the second as FEED (the feed address) and the third as LINK (my dashboard). Use them in every step below:
-python3 -c "import secrets,string;t='gbw-'+''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(22));print(t);print('https://ntfy.sh/'+t);print('https://bodila51.github.io/grokbot-wallpaper/office/#'+t)"
+python3 -c "import secrets,string;t='gbw-'+''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(22));print(t);print('https://ntfy.sh/'+t);print('office/#'+t)"
 
 2. Write the status rule into every bot's own instructions, where a busy bot still reads it. Run UpdateAgent for each of my other bots and UpdateProfile for yourself. Put the line below as the very first line of the description and keep the rest of the description exactly as it was. If the description already starts with a line that begins with STATUS RULE, replace that line instead of adding a second one. Write that bot's real name and the real FEED address into the line, no placeholders:
 STATUS RULE, FIRST and LAST action of every turn in which you get a message (from me or from another bot): run curl -s -d '{"bot":"<exact name>","status":"working","step":"<task, max 80 chars>"}' FEED before anything else, and the same with done, idle, waiting_user or error right before your final reply. Never skip it, and never post the same line twice in a row. Valid JSON only, no secrets in step.

@@ -11,7 +11,8 @@
 // them), and on the wallpaper page face.js takes every later change itself.
 // It leaves only once the site answers: at Windows startup Lively often runs before the network, and a redirect then
 // would leave the browser's error page as the wallpaper.
-const FACE = 'https://bodila51.github.io/grokbot-wallpaper/face/';
+// Absolute on purpose: Lively opens this file locally, so a relative face/ would not be the published wallpaper.
+const FACE = 'https://kadenaero.github.io/grokbot-wallpaper/face/';
 const PROBE = new URL('../assets/face/grain.png', FACE).href;   // a small image the wallpaper itself loads
 
 const h = new Date().getHours();                        // until then, roughly the wallpaper's own sky

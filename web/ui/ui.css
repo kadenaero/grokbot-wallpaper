@@ -522,6 +522,8 @@
 
 /* the floor team: how long each bot has been silent; work the usage meter saw but no status line reported */
 .bhq-mseen { flex: none; align-self: center; margin-left: 4px; color: var(--dim); font: 800 11.5px/1 var(--bhq-round); }
+.bhq-member[data-stale="true"] .bhq-mseen { color: #FFB23A; }
+.bhq-member[data-stale="true"] .bhq-av-img { opacity: .45; }
 .bhq-mstep[data-u] { color: #B9CCFF; }
 
 /* ====================================================================== motion */

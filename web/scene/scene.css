@@ -71,3 +71,68 @@
   .hqt > * { animation: none; }
   .hq-loading-track > i { animation: none; width: 100%; opacity: .3; }
 }
+
+/* Street in front of the open floor (road.js). Inside #scene, under the glass UI. Never takes a click. */
+.hq-road {
+  position: absolute; z-index: 4; left: 0; top: 0; height: 36px;
+  transform-origin: 0 50%; pointer-events: none; overflow: visible;
+}
+.hq-road-surface {
+  position: absolute; inset: 0; border-radius: 7px; overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .55), transparent 42%),
+    repeating-linear-gradient(90deg, transparent 0 18px, rgba(255, 255, 255, .9) 18px 28px, transparent 28px 46px) center / 100% 2px no-repeat,
+    linear-gradient(#d7dbe2, #b9c0cb);
+  box-shadow: 0 6px 14px rgba(24, 28, 38, .16), inset 0 1px 0 rgba(255, 255, 255, .75);
+}
+.hq-lane { position: absolute; left: 0; right: 0; height: 16px; }
+.hq-lane-go { top: 2px; }
+.hq-lane-back { bottom: 2px; }
+.hq-vehicle {
+  position: absolute; top: 1px; left: 0; display: block; width: 34px; height: 14px;
+  border-radius: 4px 7px 5px 4px; background: var(--c, #2F6BFF);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 1px 2px rgba(0, 0, 0, .25);
+  animation: hq-drive var(--dur, 16s) linear infinite;
+  animation-delay: var(--d, 0s);
+}
+.hq-vehicle::before, .hq-vehicle::after {
+  content: ""; position: absolute; bottom: -2px; width: 5px; height: 5px; border-radius: 50%;
+  background: #2A2E36; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .35);
+}
+.hq-vehicle::before { left: 4px; }
+.hq-vehicle::after { right: 5px; }
+.hq-vehicle-sedan { width: 36px; }
+.hq-vehicle-sedan { background:
+  linear-gradient(#9fd0ff, #9fd0ff) 16px 1px / 12px 6px no-repeat,
+  var(--c); }
+.hq-vehicle-hatch { width: 28px; height: 13px; border-radius: 5px 8px 5px 5px; }
+.hq-vehicle-hatch { background:
+  linear-gradient(rgba(255, 255, 255, .75), rgba(255, 255, 255, .75)) 12px 1px / 9px 5px no-repeat,
+  var(--c); }
+.hq-vehicle-van { width: 44px; height: 15px; border-radius: 3px; }
+.hq-vehicle-van { background:
+  linear-gradient(rgba(220, 236, 255, .9), rgba(220, 236, 255, .9)) 8px 2px / 8px 7px no-repeat,
+  linear-gradient(rgba(220, 236, 255, .9), rgba(220, 236, 255, .9)) 20px 2px / 8px 7px no-repeat,
+  var(--c); }
+.hq-vehicle-wagon { width: 42px; height: 14px; border-radius: 4px 3px 3px 4px; }
+.hq-vehicle-wagon { background:
+  linear-gradient(rgba(255, 255, 255, .7), rgba(255, 255, 255, .7)) 14px 1px / 14px 6px no-repeat,
+  var(--c); }
+.hq-lane-back .hq-vehicle { animation-name: hq-drive-back; border-radius: 7px 4px 4px 5px; }
+@keyframes hq-drive {
+  from { transform: translateX(-48px); }
+  to { transform: translateX(var(--travel, 900px)); }
+}
+@keyframes hq-drive-back {
+  from { transform: translateX(var(--travel, 900px)); }
+  to { transform: translateX(-48px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hq-vehicle { animation: none !important; }
+  .hq-lane-go .hq-vehicle:nth-child(1) { left: 12%; }
+  .hq-lane-go .hq-vehicle:nth-child(2) { left: 46%; }
+  .hq-lane-go .hq-vehicle:nth-child(3) { left: 74%; }
+  .hq-lane-back .hq-vehicle:nth-child(1) { left: 22%; }
+  .hq-lane-back .hq-vehicle:nth-child(2) { left: 55%; }
+  .hq-lane-back .hq-vehicle:nth-child(3) { left: 82%; }
+}

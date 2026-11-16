@@ -24,7 +24,10 @@ import { StateStore, botIdFor } from './lib/state.js';
 import { FEED_BASE, feedFromLink } from './lib/feedbase.js';
 
 const RELAY = 'https://relay.0xcodila.com', NTFY = 'https://ntfy.sh';
-const MAX_LINE = 4096, KEEP = 600, TICK_MS = 30e3, DAY_MS = 24 * 3600e3, PING_MS = 60e3;
+const MAX_LINE = 4096, KEEP = 600, HISTORY_CAP = 2500, TICK_MS = 30e3, DAY_MS = 24 * 3600e3, PING_MS = 60e3;
+// Replay everything the mailbox still has (ntfy: `since=all`), then follow live. 12h used to drop a roster
+// or a look that arrived just outside the window, so the office opened empty until the next post.
+const HISTORY_SINCE = 'all';
 const QUIET_MS = 20 * 60e3, CHECK_MS = 6 * 3600e3;    // a silent worker turns idle; a status check stays up this long
 // Everyone's bots, ours included, are built from their look (the app's 14 avatars and 11 colours, read from a
 // screenshot), so a bot in the office is the bot in the app. The hand-made GLBs in assets/blobs/ stay for the local server.
@@ -48,6 +51,8 @@ export async function connectFeed({ topic, servers }, onState) {
   const store = new StateStore({ tz, quietIdleMs: QUIET_MS, hasAvatar: (id) => HANDMADE.has(id) });   // no GLB probe: every bot is generated from its look
   const cfg = {};                                        // per bot name: { look, chat_url } -> the store's bots config
   const routines = new Map();                            // bot id -> { name, items }
+  const roster = new Set();                              // bot ids named by a roster line
+  const synthetic = new Set();                           // bot ids whose floor we invented (Ops / Unassigned)
   let check = null;                                      // the latest status check: { ms, names }
   let lines = [], saveTimer = 0;
   const seen = new Set();
@@ -56,11 +61,12 @@ export async function connectFeed({ topic, servers }, onState) {
   if (usual) lines.push(...cached(oldKey).map((l) => ({ ...l, src: l.src || 'ntfy' })));
   await Promise.all(sources.map(async (s) => {
     try {
-      const text = await (await fetch(`${s.base}/json?poll=1&since=12h`, { cache: 'no-store' })).text();
+      const text = await (await fetch(`${s.base}/json?poll=1&since=${HISTORY_SINCE}`, { cache: 'no-store' })).text();
       for (const row of text.split('\n')) if (row) keep(s, JSON.parse(row));
     } catch { /* offline or down: the other mailbox and the cache still show the office */ }
   }));
   lines = lines.filter(fresh).sort((a, b) => a.time - b.time);   // stable: lines of one second keep the mailbox's order
+  if (lines.length > HISTORY_CAP) lines = lines.slice(-HISTORY_CAP);
   for (const l of lines) ingest(l, true);
   for (const s of sources) s.lastId = lines.findLast((l) => l.src === s.tag)?.id ?? null;
   save();
@@ -119,7 +125,7 @@ export async function connectFeed({ topic, servers }, onState) {
   }
   async function catchUp(s) {
     try {
-      const text = await (await fetch(`${s.base}/json?poll=1&since=${s.lastId ?? '12h'}`, { cache: 'no-store' })).text();
+      const text = await (await fetch(`${s.base}/json?poll=1&since=${s.lastId ?? HISTORY_SINCE}`, { cache: 'no-store' })).text();
       let changed = false;
       for (const row of text.split('\n')) if (row && take(s, JSON.parse(row))) changed = true;
       if (changed) publish();
@@ -132,9 +138,17 @@ export async function connectFeed({ topic, servers }, onState) {
     if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return false;
     const t = typeof rec.t === 'string' ? rec.t : new Date(time * 1000).toISOString();
     if (Array.isArray(rec.roster)) {
-      for (const name of rec.roster.slice(0, 400)) {
-        if (typeof name === 'string' && name.trim() && !store.bots.has(botIdFor(name))) store.apply({ t, bot: name, status: 'idle', step: '', listed: true }, { replay });
+      let dropped = false;
+      for (const raw of rec.roster.slice(0, 400)) {
+        if (typeof raw !== 'string' || !raw.trim()) continue;
+        const name = raw.trim();
+        const id = botIdFor(name);
+        roster.add(id);
+        // The roster now owns this bot. Drop a floor we invented; a groups line's team is left in place.
+        if (synthetic.delete(id) && cfg[name]) { delete cfg[name].floor; dropped = true; }
+        if (!store.bots.has(id)) store.apply({ t, bot: name, status: 'idle', step: '', listed: true }, { replay });
       }
+      if (dropped) store.setBotsConfig(cfg);
       return true;
     }
     if (isMap(rec.looks)) {
@@ -144,13 +158,17 @@ export async function connectFeed({ topic, servers }, onState) {
     }
     if (isMap(rec.groups)) {                             // {"groups":{"Bot A":"Content"}}: the main bot's teams = floors
       for (const [name, team] of Object.entries(rec.groups).slice(0, 400)) {
-        if (typeof team === 'string' && team.trim()) (cfg[name] ||= {}).floor = team.trim().slice(0, 40);
+        if (typeof team === 'string' && team.trim()) {
+          synthetic.delete(botIdFor(name));
+          (cfg[name] ||= {}).floor = team.trim().slice(0, 40);
+        }
       }
       store.setBotsConfig(cfg);
       return true;
     }
-    if (isMap(rec.chat)) {                               // only app deep links and web pages (the store refuses scripts)
-      for (const [name, url] of Object.entries(rec.chat).slice(0, 400)) {
+    const links = isMap(rec.links) ? rec.links : isMap(rec.chat) ? rec.chat : null;
+    if (links) {                                         // {"chat":{…}} or {"links":{…}}: app deep links and web pages
+      for (const [name, url] of Object.entries(links).slice(0, 400)) {
         if (typeof url === 'string' && /^(grokbot|https):\/\//i.test(url.trim())) (cfg[name] ||= {}).chat_url = url.trim();
       }
       store.setBotsConfig(cfg);
@@ -174,6 +192,8 @@ export async function connectFeed({ topic, servers }, onState) {
       if (!check || ms >= check.ms) check = { ms, names };
       return true;
     }
+    const botName = typeof rec.bot === 'string' ? rec.bot.trim() : '';
+    if (botName && placeUnrostered(botName, rec.group, { roster, cfg, synthetic })) store.setBotsConfig(cfg);
     store.apply({ ...rec, t }, { replay });
     return true;
   }
@@ -225,3 +245,30 @@ async function beacon(topic, { bots, floors, tags, has }) {
 }
 
 function isMap(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+
+function opsFloor(cfg) {
+  for (const e of Object.values(cfg)) {
+    const f = e && typeof e.floor === 'string' ? e.floor.trim() : '';
+    if (f.toLowerCase() === 'ops') return f;
+  }
+  return null;
+}
+
+/** A status for a bot the roster has not named, with no team of its own, still gets a desk: on Ops when
+ *  that team already exists, otherwise on Unassigned. Returns true when `cfg` changed. */
+export function placeUnrostered(name, group, { roster, cfg, synthetic }) {
+  const id = botIdFor(name);
+  const team = typeof group === 'string' ? group.trim() : '';
+  if (team && synthetic.has(id)) {
+    synthetic.delete(id);
+    if (cfg[name]) delete cfg[name].floor;
+    return true;
+  }
+  if (roster.has(id) || team) return false;
+  if (cfg[name]?.floor && !synthetic.has(id)) return false;
+  const floor = opsFloor(cfg) || 'Unassigned';
+  if (cfg[name]?.floor === floor && synthetic.has(id)) return false;
+  (cfg[name] ||= {}).floor = floor;
+  synthetic.add(id);
+  return true;
+}

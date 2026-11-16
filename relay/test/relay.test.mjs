@@ -67,7 +67,7 @@ test('health answers with the relay limits', () => {
 
 test('CORS: any origin, preflight included', async () => {
   const t = topic();
-  const pre = await fetch(`${BASE}/${t}`, { method: 'OPTIONS', headers: { origin: 'https://bodila51.github.io', 'access-control-request-method': 'POST' } });
+  const pre = await fetch(`${BASE}/${t}`, { method: 'OPTIONS', headers: { origin: 'https://kadenaero.github.io', 'access-control-request-method': 'POST' } });
   assert.equal(pre.status, 204);
   assert.equal(pre.headers.get('access-control-allow-origin'), '*');
   assert.match(pre.headers.get('access-control-allow-methods'), /POST/);

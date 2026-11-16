@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { FEED_BASE, feedBase, feedFromLink, baseTag } from '../../web/lib/feedbase.js';
-import { StateStore } from '../state.js';
+import { placeUnrostered } from '../../web/feed.js';
+import { StateStore, botIdFor } from '../state.js';
 
 const root = new URL('../../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
@@ -60,6 +61,31 @@ test('office fallbacks: a silent worker turns idle after 20 min, last_seen ignor
   assert.equal(st.bots.nova.effective_status, 'idle');
   assert.equal(st.summary.stuck, 0);
   assert.equal(st.bots.nova.today.working_min, 20);
+});
+
+test('a status for a bot that is not on the roster still gets a floor and a step', () => {
+  const cfg = { Lead: { floor: 'Ops' } };
+  const synthetic = new Set();
+  assert.equal(placeUnrostered('Scout', undefined, { roster: new Set(), cfg, synthetic }), true);
+  assert.equal(cfg.Scout.floor, 'Ops');
+  assert.equal(placeUnrostered('Scout', undefined, { roster: new Set(), cfg, synthetic }), false);
+
+  const bare = {};
+  placeUnrostered('Solo', '', { roster: new Set(), cfg: bare, synthetic: new Set() });
+  assert.equal(bare.Solo.floor, 'Unassigned');
+  assert.equal(placeUnrostered('Bea', 'Content', { roster: new Set(), cfg: {}, synthetic: new Set() }), false);
+  assert.equal(placeUnrostered('Lead', undefined, { roster: new Set([botIdFor('Lead')]), cfg: {}, synthetic: new Set() }), false);
+
+  const store = new StateStore({ now: () => Date.parse('2026-11-16T12:00:00Z'), tz: 'UTC', quietIdleMs: 20 * 60e3 });
+  store.setBotsConfig(bare);
+  store.apply({ t: '2026-11-16T11:40:00Z', bot: 'Solo', status: 'working', step: 'drafting the note' });
+  const st = store.snapshot();
+  const bot = st.bots[botIdFor('Solo')];
+  assert.equal(bot.floor, 'unassigned');
+  assert.equal(bot.step, 'drafting the note');
+  assert.equal(bot.effective_status, 'working');
+  assert.equal(st.feed[0].step, 'drafting the note');
+  assert.ok(bot.look == null);                 // default look: the scene builds a blob from the id
 });
 
 test('office fallbacks: usage rose without a status line -> worked (unreported) until it speaks', () => {

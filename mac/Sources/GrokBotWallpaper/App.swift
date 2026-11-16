@@ -270,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func editAddress() {
         let alert = NSAlert()
         alert.messageText = "Wallpaper address"
-        alert.informativeText = "The page the wallpaper shows, e.g. https://bodila51.github.io/grokbot-wallpaper/face/#your-topic, "
+        alert.informativeText = "The page the wallpaper shows, e.g. face/#your-topic on this site, "
             + "or your own bot server: http://localhost:8787/face/?key=…"
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 440, height: 24))
         field.stringValue = Settings.url.absoluteString
@@ -285,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .alertFirstButtonReturn:
             guard let url = Settings.address(from: field.stringValue) else {
                 showAlert("That doesn't look like a web address",
-                          "Use an address like https://bodila51.github.io/grokbot-wallpaper/face/#your-topic or http://localhost:8787/face/?key=…")
+                          "Use an address like face/#your-topic on this site, or http://localhost:8787/face/?key=…")
                 return
             }
             Settings.url = url
@@ -349,7 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 enum Settings {
-    static let defaultURL = URL(string: "https://bodila51.github.io/grokbot-wallpaper/face/")!
+    static let defaultURL = URL(string: "https://kadenaero.github.io/grokbot-wallpaper/face/")!
 
     static var url: URL {
         get { UserDefaults.standard.string(forKey: "wallpaperURL").flatMap { URL(string: $0) } ?? defaultURL }
