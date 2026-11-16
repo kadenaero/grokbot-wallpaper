@@ -34,6 +34,7 @@ const STEPS_SHOWN = 3;
 const FEED_OUT_MS = 420;
 const FINISHED_MAX = 60;
 const DAY_MS = 24 * 3600 * 1000;
+const STALE_MS = 20 * 60 * 1000;   // no status line for this long: the row is marked stale (same window as a silent worker turning idle)
 const LS_BLUR = 'bothq.waitBlur';
 const LS_DOCK = 'bothq.dock';
 
@@ -474,6 +475,8 @@ export function initUI(handlers) {
   U.timer = setInterval(() => {
     if (document.hidden || !U.last.state) return;
     safe('dock', () => U.dock && renderDock(U.last.state));
+    safe('panel', () => U.panel && renderPanel(U.last.state, U.last.opts));
+    safe('feed', () => { if (U.feed) { renderFeed(U.last.state); refreshFeedTimes(); } });
   }, 15000);
 }
 
@@ -532,6 +535,7 @@ function buildFloors(root) {
   const count = h('b', { class: 'bhq-num' });
   const fscroll = h('div', { class: 'bhq-fscroll' }, shaft);
   root.append(h('div', { class: 'bhq-fhead' }, h('span', { text: 'Floors' }), count), fscroll);
+  root.addEventListener('keydown', onFloorKey);
   U.fl = { root, shaft, car, count, fscroll, carTop: null, carH: null, carShown: false, ready: false };
   if (typeof ResizeObserver === 'function') {
     U.ro = new ResizeObserver(() => placeCar());
@@ -546,8 +550,38 @@ function makeFloor(id) {
   const count = h('span', { class: 'bhq-num bhq-fcount' });
   const btn = h('button', { class: 'bhq-floor', type: 'button', 'data-id': id },
     num, h('span', { class: 'bhq-ftext' }, name, dots), count);
-  btn.addEventListener('click', () => { if (U.h.onSelectFloor) U.h.onSelectFloor(id); });
+  const select = () => { if (U.h.onSelectFloor) U.h.onSelectFloor(id); };
+  // Mouse: select on press. A click that the canvas capture or a 2px drag cancels still changes the floor.
+  // Touch keeps using click, so a sideways flick on the phone chip row scrolls instead of switching.
+  btn.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    select();
+  });
+  btn.addEventListener('click', select);
   return { btn, num, name, dots, count, dotEls: [] };
+}
+
+// Desktop keyboard: arrows move through the menu (and Left/Right along the phone chips). Home/End jump.
+function onFloorKey(e) {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.defaultPrevented) return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  const buttons = [...U.fl.root.querySelectorAll('.bhq-floor')];
+  if (!buttons.length) return;
+  const focused = buttons.findIndex((b) => b === document.activeElement);
+  const active = buttons.findIndex((b) => b.getAttribute('aria-current') === 'true');
+  const i = focused >= 0 ? focused : active;
+  let next = -1;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = i < 0 ? 0 : Math.min(buttons.length - 1, i + 1);
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = i < 0 ? buttons.length - 1 : Math.max(0, i - 1);
+  else if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = buttons.length - 1;
+  else return;
+  e.preventDefault();
+  const btn = buttons[next];
+  if (!btn) return;
+  btn.focus();
+  if (U.h.onSelectFloor) U.h.onSelectFloor(btn.dataset.id);
 }
 
 /* ------------------------------------------------------------------ build: panel (floor team / bot card) */
@@ -1217,6 +1251,8 @@ function renderFloors(state, o) {
     setAttr(r.btn, 'aria-label', 'Floor ' + number + ', ' + (fl.name || fl.id) + ': ' + ids.length + ' ' + plural(ids.length, 'bot', 'bots') + (summary ? ' (' + summary + ')' : ''));
     setAttr(r.btn, 'title', summary || null);
     setAttr(r.btn, 'aria-current', fl.id === activeId ? 'true' : null);
+    // One tab stop: the current floor. Arrows move from there (onFloorKey).
+    setAttr(r.btn, 'tabindex', (fl.id === activeId || (!activeId && i === 0)) ? '0' : '-1');
   });
 
   for (const [id, r] of U.floors) {
@@ -1364,12 +1400,14 @@ function renderTeam(state, floor, o) {
     setAvatar(c.av, bot, s);
     setText(c.name, bot.name || id);
     const unrep = s === 'idle' ? unreportedText(bot) : '';
-    const quiet = s === 'idle' && bot.status === 'working';   // went silent mid-task: its last step is stale
-    setText(c.step, unrep || (quiet ? statusLabel(s) : bot.step || statusLabel(s)));
-    setAttr(c.step, 'data-u', unrep ? '' : null);
     const seenAt = parseTs(bot.last_seen);
-    setText(c.seen, seenAt == null ? '–' : relShort(seenAt));
-    setAttr(c.seen, 'title', seenAt == null ? 'No status line yet' : 'Last status line ' + relAgo(seenAt) + ' (' + hhmm(seenAt) + ')');
+    const quiet = s === 'idle' && bot.status === 'working';   // went silent mid-task
+    const stale = quiet || (seenAt != null && nowMs() - seenAt >= STALE_MS);
+    setText(c.step, unrep || bot.step || statusLabel(s));
+    setAttr(c.step, 'data-u', unrep ? '' : null);
+    setAttr(c.btn, 'data-stale', stale ? 'true' : null);
+    setText(c.seen, seenAt == null ? '–' : relShort(seenAt) + (stale ? ' stale' : ''));
+    setAttr(c.seen, 'title', seenAt == null ? 'No status line yet' : (stale ? 'Stale · ' : '') + 'Last status line ' + relAgo(seenAt) + ' (' + hhmm(seenAt) + ')');
     setAttr(c.btn, 'data-s', s);
     setAttr(c.btn, 'aria-label', (bot.name || id) + ', ' + statusLabel(s) + ', ' + seenText(bot));
     setAttr(c.btn, 'title', (bot.name || id) + ': ' + statusLabel(s) + (bot.step ? '. ' + bot.step : '') + ' · ' + seenText(bot));
@@ -1403,11 +1441,14 @@ function renderCard(state, bot) {
 
   setAttr(c.stDot, 'data-s', s);
   const since = parseTs(bot.since);
+  const seenAt = parseTs(bot.last_seen);
+  const stale = (s === 'idle' && bot.status === 'working') || (seenAt != null && now - seenAt >= STALE_MS);
   const age = since == null ? '' : ' · ' + (now - since < 60000 ? 'just now' : fmtDur(now - since));
-  setText(c.stTxt, (CHIP[s] || statusLabel(s)) + age);
+  setText(c.stTxt, (CHIP[s] || statusLabel(s)) + (stale ? ' · stale' : '') + age);
+  setAttr(c.hero, 'data-stale', stale ? 'true' : null);
 
   const unrep = s === 'idle' ? unreportedText(bot) : '';
-  setText(c.now, unrep || (s === 'idle' && bot.status === 'working' ? 'Went quiet after: ' + (bot.step || 'a task') : bot.step || 'No data on the current step'));
+  setText(c.now, unrep || bot.step || 'No data on the current step');
 
   // Task: hide when empty, id-like ("tsk-1643") or a plain copy of the current step.
   const task = typeof bot.task === 'string' ? bot.task.trim() : '';
@@ -1460,8 +1501,9 @@ function makeRow(ev, state) {
   const bot = state.bots && state.bots[ev.bot];
   const name = ev.name || (bot && bot.name) || ev.bot || '';
   const s = ev.status || 'idle';
+  const ms = parseTs(ev.t);
   return h('li', { class: 'bhq-frow', 'data-s': s },
-    h('time', { class: 'bhq-num', text: hhmm(parseTs(ev.t)), datetime: ev.t || '' }),
+    h('time', { class: 'bhq-num', text: ms == null ? '' : relShort(ms), datetime: ev.t || '', 'data-ms': ms == null ? '' : String(ms) }),
     h('i', { class: 'bhq-dot', 'data-s': s, 'aria-hidden': 'true' }),
     h('span', { class: 'bhq-ftxt' }, h('b', { text: name }), ' ' + (ev.step || statusLabel(ev.status))));
 }
@@ -1516,6 +1558,15 @@ function renderFeed(state) {
 
   setHidden(fd.empty, items.length > 0);
   U.feedFirst = false;
+  refreshFeedTimes();
+}
+
+function refreshFeedTimes() {
+  if (!U || !U.feed) return;
+  for (const time of U.feed.list.querySelectorAll('time[data-ms]')) {
+    const ms = Number(time.getAttribute('data-ms'));
+    if (Number.isFinite(ms) && ms > 0) setText(time, relShort(ms));
+  }
 }
 
 /* ---- dock */

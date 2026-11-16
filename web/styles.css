@@ -149,8 +149,9 @@ body {
   pointer-events: none;
 }
 #floors {
-  position: fixed; z-index: 20; left: var(--gutter); top: var(--below-top);
+  position: fixed; z-index: 30; left: var(--gutter); top: var(--below-top);
   width: var(--floors-w); max-height: calc(100vh - var(--below-top) - 210px);
+  pointer-events: auto;
 }
 #panel {
   position: fixed; z-index: 20; right: var(--gutter); top: var(--below-top);

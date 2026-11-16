@@ -13,9 +13,10 @@ import { Actor } from './actor.js';
 import { generateBlob } from './blobgen.js';
 import { Spring, clamp } from './spring.js';
 import { sofiaHour, fontsPromise } from './walls.js';
+import { createRoad } from './road.js';
 
-// Relative to the page (not the site root), so the office also works when it is published in a sub-folder, e.g.
-// https://bodila51.github.io/grokbot-wallpaper/office/ -> ../assets. Locally the page is at `/`, where this is /assets.
+// Relative to the page (not the site root), so the office also works when it is published in a sub-folder
+// (…/office/ -> ../assets). Locally the page is at `/web/`, where this is /assets.
 const ASSETS = '../assets';
 const ISO_DIR = new THREE.Vector3(1, 1, 1).normalize();
 const HOME = { x: -0.4, y: -0.3, z: 0.3 };             // camera target relative to the active floor's surface
@@ -28,7 +29,7 @@ const SIN_E = Math.sin(Math.atan(1 / Math.SQRT2));      // sin(35.264°) = groun
 // the camera), neighbours alternating so tags never collide.
 const DESK_ORDER = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
 
-let renderer, labels, camera, scene, container, callbacks, daylight, building, post;
+let renderer, labels, camera, scene, container, callbacks, daylight, building, post, road;
 let assets = null;
 let lastState = null, lastView = { currentFloor: null, selectedBot: null };
 const actors = new Map();
@@ -124,6 +125,7 @@ export function initScene(el, cbs = {}) {
   });
 
   post = createPost(renderer, scene, camera);
+  road = createRoad(container);
 
   addPointerHandlers();
   new ResizeObserver(resize).observe(container);
@@ -362,7 +364,27 @@ function setPointer(e) {
   pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
 }
 
+// The canvas fills the viewport. A desktop click meant for the floor menu (or any overlay) must not start a
+// camera drag: hit-test with the canvas and its labels ignored, and if a control is there, leave the pointer alone.
+// When the canvas is the event target but a floor button sits at that point, activate the button.
+function uiUnderCanvas(x, y) {
+  const els = [renderer?.domElement, labels?.domElement].filter(Boolean);
+  const prev = els.map((el) => el.style.pointerEvents);
+  for (const el of els) el.style.pointerEvents = 'none';
+  const hit = document.elementFromPoint(x, y);
+  els.forEach((el, i) => { el.style.pointerEvents = prev[i]; });
+  return hit instanceof Element ? hit : null;
+}
+
+const UI_HIT = '#floors, #topbar, #panel, #feed, .bhq-dock, .bhq-zoom, .bhq-sheet, .bhq-snd, .bhq-snd-pop, .bhq-share';
+
 function onDown(e) {
+  const under = uiUnderCanvas(e.clientX, e.clientY);
+  if (under) {
+    const floorBtn = under.closest('.bhq-floor');
+    if (floorBtn) { floorBtn.click(); return; }
+    if (under.closest(UI_HIT)) return;
+  }
   renderer.domElement.setPointerCapture?.(e.pointerId);
   setPointer(e);
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -620,6 +642,7 @@ function frame(t) {
   }
   stepEffects(dt);
 
+  if (road && building) road.update(camera, building.activeY, renderer.domElement.clientWidth, renderer.domElement.clientHeight);
   if (post) {
     focusV.set(0, (building ? building.cabinY.x : 0) + 0.7, 0).project(camera);
     post.render(clamp(focusV.y * 0.5 + 0.5, 0, 1), dt, clamp(1.5 / camera.zoom, 0.25, 1));
