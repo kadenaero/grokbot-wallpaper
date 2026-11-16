@@ -6,7 +6,7 @@ import { floorsWithSkyline } from './scene/skyline.js';
 import { initSound, sfx } from './audio/sound.js';
 
 const POLL_MS = 1000;
-const view = { currentFloor: null, selectedBot: null };
+const view = { currentFloor: null, selectedBot: null, interior: false };
 let state = null;
 let ui = { initUI() {}, renderUI() {} };
 let demoTimer = null;
@@ -27,11 +27,15 @@ try {
 initScene(document.getElementById('scene'), {
   onSelectBot: (id) => select(id),
   onHoverBot: (id) => sfx.hover(id),
+  onEnterFloor: (id) => setFloor(id, false, true),
+  onLeaveInterior: () => leaveInterior(),
 });
 
 ui.initUI({
   onSelectBot: (id) => select(id),
-  onSelectFloor: (id) => setFloor(id),
+  onSelectFloor: (id) => setFloor(id, false, true),
+  onStepFloor: (id) => setFloor(id),
+  onLeaveInterior: () => leaveInterior(),
   onZoom: (dir) => { zoom(dir); sfx.zoom(dir); },
   onOpenChat: (id, url) => { if (url) location.href = url; },
 });
@@ -39,7 +43,13 @@ ui.initUI({
 // music and sound effects (not on the wallpaper): the speaker button sits in the top bar's right group
 if (!WALLPAPER) initSound({ slot: document.querySelector('#topbar .bhq-right') });
 
-addEventListener('keydown', (e) => { if (e.key === 'Escape') select(null); });
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (view.interior) leaveInterior();
+  else select(null);
+});
 
 function select(id) {
   const before = view.selectedBot;
@@ -60,7 +70,7 @@ function shownFloors() {
   return floorsWithSkyline(state?.floors);
 }
 
-function setFloor(id, keepSelection = false) {
+function setFloor(id, keepSelection = false, enter = false) {
   const floors = shownFloors();
   if (!floors.some((f) => f.id === id)) return;
   if (id !== view.currentFloor) {                        // the elevator's chime rings higher on higher floors
@@ -68,9 +78,16 @@ function setFloor(id, keepSelection = false) {
     sfx.floor(order);
   }
   view.currentFloor = id;
+  if (enter) view.interior = true;
   if (!keepSelection) view.selectedBot = null;
   if (!WALLPAPER) { try { localStorage.setItem('bothq.floor', id); } catch {} }
-  zoom('reset');
+  render();
+}
+
+function leaveInterior() {
+  if (!view.interior) return;
+  view.interior = false;
+  view.selectedBot = null;
   render();
 }
 

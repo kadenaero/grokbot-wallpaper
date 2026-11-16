@@ -459,6 +459,7 @@ export function initUI(handlers) {
   if (floors) buildFloors(floors); else console.warn('[ui] #floors not found');
   if (panel) buildPanel(panel); else console.warn('[ui] #panel not found');
   buildFeed(feed);
+  buildBack();
   buildZoom();
   buildDock(floors, feed);
   buildSheet(feed);
@@ -468,6 +469,7 @@ export function initUI(handlers) {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     const t = e.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (U.last.opts.interior && U.h.onLeaveInterior) { U.h.onLeaveInterior(); return; }
     if (U.last.opts.selectedBot && U.h.onSelectBot) U.h.onSelectBot(null);
   };
   document.addEventListener('keydown', U.keyHandler);
@@ -583,8 +585,19 @@ function onFloorKey(e) {
   else return;
   e.preventDefault();
   const btn = buttons[next];
-  if (!btn || !U.h.onSelectFloor) return;
-  U.h.onSelectFloor(btn.dataset.id);
+  const step = U.h.onStepFloor || U.h.onSelectFloor;
+  if (!btn || !step) return;
+  step(btn.dataset.id);
+}
+
+function buildBack() {
+  const btn = own(h('button', {
+    class: 'bhq-back', type: 'button', hidden: true, text: 'Back to tower',
+    'aria-label': 'Leave this floor and return to the tower',
+  }));
+  btn.addEventListener('click', () => { if (U.h.onLeaveInterior) U.h.onLeaveInterior(); });
+  document.body.append(btn);
+  U.back = btn;
 }
 
 /* ------------------------------------------------------------------ build: panel (floor team / bot card) */
@@ -1120,7 +1133,7 @@ export function setSheetOpen(open) { sheetGo(!!open, 0, true); }
 export function renderUI(state, opts) {
   if (!U || !state) return;
   opts = opts || {};
-  const o = { currentFloor: opts.currentFloor || null, selectedBot: opts.selectedBot || null };
+  const o = { currentFloor: opts.currentFloor || null, selectedBot: opts.selectedBot || null, interior: !!opts.interior };
   U.last = { state, opts: o };
   syncClock(state);
   if (!U.ready) { // let the first paint land without a fade, then mark the page ready (styles.css may use it)
@@ -1136,6 +1149,7 @@ export function renderUI(state, opts) {
   safe('zoom', () => {
     if (U.zoom && !U.zoom.root.isConnected) document.body.append(U.zoom.root);
   });
+  safe('back', () => { if (U.back) setHidden(U.back, !o.interior); });
   safe('fades', updateFades);
 }
 

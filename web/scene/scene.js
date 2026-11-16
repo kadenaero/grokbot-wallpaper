@@ -14,6 +14,7 @@ import { generateBlob } from './blobgen.js';
 import { Spring, clamp } from './spring.js';
 import { sofiaHour, fontsPromise } from './walls.js';
 import { createRoad } from './road.js';
+import { createCity, createSimpleRoom } from './city.js';
 
 // Relative to the page (not the site root), so the office also works when it is published in a sub-folder
 // (…/office/ -> ../assets). Locally the page is at `/web/`, where this is /assets.
@@ -50,6 +51,7 @@ let hoveredId = null, pointerDirty = false, drag = null;
 const touches = new Map();
 let pinch = null;
 let introDone = false, switchedAt = 0, nowSec = 0, settledOnce = false;
+let inside = false;
 let loadTimer = 0;
 let loadingEl = null;
 // Debug/test switches: ?floor=<id> forces the active floor, ?from=<id> starts there first, ?intro=0 skips the load
@@ -119,6 +121,7 @@ export function initScene(el, cbs = {}) {
   container.append(labels.domElement);
 
   scene = new THREE.Scene();
+  createCity(scene);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0.55;
@@ -134,6 +137,7 @@ export function initScene(el, cbs = {}) {
   officeAssets.then((a) => {
     assets = a;
     building = new Building({ scene, daylight, assets: a, baseUrl: `${ASSETS}/office`, renderer });
+    building.setRoom(createSimpleRoom());
     daylight.setBuilding(building);                        // sun stripes on the active floor, ambient tint of the baked surfaces
     a.spots.lounges.forEach((s) => { if (s) s.lounge = true; });
     window.bothq = Object.assign(window.bothq || {}, { source: a.source });
@@ -179,11 +183,15 @@ export function renderScene(state, view) {
 
 function sync() {
   const state = lastState, view = lastView;
+  const wasInside = inside;
+  inside = !!view.interior;
+  building.setInside(inside);
   const floors = [...state.floors].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   building.setFloors(floors);
   let want = view.currentFloor && floors.some((f) => f.id === view.currentFloor) ? view.currentFloor : (floors[0]?.id ?? '_');
   if (TEST.floor && floors.some((f) => f.id === TEST.floor)) want = TEST.from && !introDone && floors.some((f) => f.id === TEST.from) ? TEST.from : TEST.floor;
   if (building.activeId !== want) switchFloor(want, !introDone);
+  else if (wasInside !== inside) frameCamera(false);
   introDone = true;
 
   const inst = building.activeOpen();
@@ -288,13 +296,7 @@ function switchFloor(id, first) {
   actors.clear();
   hoveredId = null;
   building.setActive(id, { intro: first });
-  const y = building.activeY + HOME.y;
-  cam.x.to(HOME.x); cam.z.to(HOME.z); cam.y.to(y); cam.zoom.to(0);
-  if (first) {
-    cam.x.snap(HOME.x); cam.z.snap(HOME.z);
-    cam.y.snap(y - 2.6); cam.zoom.snap(Math.log(0.86));
-    cam.y.to(y, 0.1); cam.zoom.to(0, 0.1);
-  }
+  frameCamera(first);
   switchedAt = nowSec;
   if (first) { building.prewarm(camera); hideLoader(); }
 }
@@ -337,12 +339,25 @@ function hideLoader() {
 
 // ---------- camera (all on springs) ----------
 
-export function zoom(dir) {
-  if (!building) return;
-  if (dir === 'reset') {
-    cam.x.to(HOME.x); cam.z.to(HOME.z); cam.y.to(building.activeY + HOME.y); cam.zoom.to(0);
+function frameCamera(first) {
+  const y = building.activeY;
+  if (inside) {
+    const f = building.interiorFocus();
+    cam.x.to(f.x); cam.z.to(f.z); cam.y.to(y + 0.7); cam.zoom.to(Math.log(f.zoom));
+    if (first) { cam.x.snap(f.x); cam.z.snap(f.z); cam.y.snap(y + 0.7); cam.zoom.snap(Math.log(f.zoom)); }
     return;
   }
+  cam.x.to(HOME.x); cam.z.to(HOME.z); cam.y.to(y + HOME.y); cam.zoom.to(0);
+  if (first) {
+    cam.x.snap(HOME.x); cam.z.snap(HOME.z);
+    cam.y.snap(y + HOME.y - 2.6); cam.zoom.snap(Math.log(0.86));
+    cam.y.to(y + HOME.y, 0.1); cam.zoom.to(0, 0.1);
+  }
+}
+
+export function zoom(dir) {
+  if (!building) return;
+  if (dir === 'reset') { frameCamera(false); return; }
   const z = clamp(Math.exp(cam.zoom.target) * (dir === 'in' ? 1.3 : 1 / 1.3), ZOOM.min, ZOOM.max);
   cam.zoom.to(Math.log(z));
 }
@@ -422,7 +437,7 @@ function uiUnderCanvas(x, y) {
   return hit instanceof Element ? hit : null;
 }
 
-const UI_HIT = '#floors, #topbar, #panel, #feed, .bhq-dock, .bhq-zoom, .bhq-sheet, .bhq-snd, .bhq-snd-pop, .bhq-share';
+const UI_HIT = '#floors, #topbar, #panel, #feed, .bhq-dock, .bhq-zoom, .bhq-back, .bhq-sheet, .bhq-snd, .bhq-snd-pop, .bhq-share';
 
 function onDown(e) {
   const under = uiUnderCanvas(e.clientX, e.clientY);
@@ -483,7 +498,25 @@ function onUp(e) {
     return;
   }
   setPointer(e);
-  callbacks.onSelectBot?.(pick());
+  const bot = pick();
+  if (bot) { callbacks.onSelectBot?.(bot); return; }
+  const floorId = pickFloor();
+  if (floorId) { callbacks.onEnterFloor?.(floorId); return; }
+  if (inside) callbacks.onLeaveInterior?.();
+}
+
+function pickFloor() {
+  if (!building) return null;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(building.pickRoots(), true);
+  for (const h of hits) {
+    let o = h.object;
+    while (o) {
+      if (o.userData && o.userData.floorId) return o.userData.floorId;
+      o = o.parent;
+    }
+  }
+  return null;
 }
 
 function onWheel(e) {
@@ -688,7 +721,10 @@ function frame(t) {
   }
   stepEffects(dt);
 
-  if (road && building) road.update(camera, 0, renderer.domElement.clientWidth, renderer.domElement.clientHeight);
+  if (road && building) {
+    if (inside) road.root.hidden = true;
+    else road.update(camera, 0, renderer.domElement.clientWidth, renderer.domElement.clientHeight);
+  }
   if (post) {
     focusV.set(0, (building ? building.cabinY.x : 0) + 0.7, 0).project(camera);
     post.render(clamp(focusV.y * 0.5 + 0.5, 0, 1), dt, clamp(1.5 / camera.zoom, 0.25, 1));

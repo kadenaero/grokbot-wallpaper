@@ -233,6 +233,15 @@
 .bhq-share:active { transform: scale(.9); }
 .bhq-phone .bhq-share { width: 42px; height: 42px; border-radius: 21px; }
 
+/* back out of a floor's interior */
+.bhq-back {
+  position: fixed; z-index: 30; left: 50%; bottom: 28px; transform: translateX(-50%);
+  height: 40px; padding: 0 18px; border-radius: 20px; pointer-events: auto; cursor: pointer;
+  font: 900 14px/1 var(--bhq-round); color: #1d1d22; background: #f2f2f7;
+  box-shadow: inset 0 1px 0 #fff, 0 6px 16px rgba(0, 0, 0, .28);
+}
+.bhq-phone .bhq-back { bottom: calc(var(--bhq-vis, 120px) + 16px); }
+
 /* ====================================================================== floors (elevator) */
 
 #floors { padding: 12px 10px 10px; border-radius: 24px; display: flex; flex-direction: column; overflow: hidden; }
