@@ -145,6 +145,10 @@ export class Building {
     this.shaft = new Instance(this, assets.templates.elevator_shaft, 'shaft');
     this.cabin = new Instance(this, assets.templates.elevator_cabin, 'cabin');
     this.group.add(this.shaft.root, this.cabin.root);
+    this.inside = false;
+    this.glow = makeGlow();
+    this.glowShell = this.glow.userData.shell;
+    this.group.add(this.glow);
     this.setupElevatorGeometry();
     this.cabinY = new Spring(0, 0.55);
     this.shaftTop = new Spring(1, 0.55);
@@ -273,6 +277,7 @@ export class Building {
         s = { id: f.id, name: f.name, index: i, closed: new Instance(this, this.assets.templates.floor_closed, 'closed'), open: null, lift: new Spring(1, 0.5), showOpen: false };
         this.group.add(s.closed.root);
         s.closed.setShown(false);
+        tagFloor(s.closed.root, f.id);
         this.byId.set(f.id, s);
       }
       s.index = i;
@@ -372,8 +377,35 @@ export class Building {
     inst.onSteal?.();
     slot.open = inst;
     inst.floorId = slot.id;
+    tagFloor(inst.root, slot.id);
     inst.screens.forEach((s) => { s.glow = 0; s.target = 0; });
     return inst;
+  }
+
+  setInside(on) { this.inside = !!on; }
+
+  setRoom(room) {
+    this.room = room.root;
+    this.room.userData.setRoof = (on) => room.setRoof(on);
+    this.group.add(this.room);
+  }
+
+  /** Where the interior camera should sit, and how close, for the open floor. */
+  interiorFocus() {
+    const s = this.activeSlot;
+    const sky = s && String(s.id).startsWith('hq-sky');
+    if (sky) return { x: SHAFT_SHIFT_X, z: SHAFT_SHIFT_Z, zoom: 2.3 };
+    return { x: 0, z: -0.4, zoom: 1.85 };
+  }
+
+  pickRoots() {
+    const roots = [];
+    for (const s of this.slots) {
+      if (s.closed.root.visible) roots.push(s.closed.root);
+      if (s.open?.root.visible) roots.push(s.open.root);
+    }
+    if (this.room?.visible) roots.push(this.room);
+    return roots;
   }
 
   // flags[deskIndex] = 1 when that desk's bot is working, 0 otherwise (empty desks too)
@@ -424,14 +456,16 @@ export class Building {
       // The open floor stays full size, in front of that shaft, so the desks stay in frame.
       s.closed.root.position.set(SHAFT_SHIFT_X, y, SHAFT_SHIFT_Z);
       s.closed.root.scale.set(SHAFT_SX, 1, SHAFT_SZ);
-      s.closed.setShown(!s.showOpen);
+      const slim = String(s.id).startsWith('hq-sky');
+      const showThis = !this.inside || s.index === a;
+      s.closed.setShown(showThis && !s.showOpen && !this.inside);
       if (s.open) {
         const openY = (s.index > a ? this.plateY(s.index, a) : s.index * FLOOR_STEP) + s.lift.x * DROP;
         // Empty stories and the roof stay inside the slender shaft. A team floor opens full size.
-        const slim = String(s.id).startsWith('hq-sky');
         s.open.root.position.set(slim ? SHAFT_SHIFT_X : 0, openY, slim ? SHAFT_SHIFT_Z : 0);
         s.open.root.scale.set(slim ? SHAFT_SX : 1, 1, slim ? SHAFT_SZ : 1);
-        s.open.setShown(s.showOpen);
+        // Inside an empty storey the simple room replaces the scaled office.
+        s.open.setShown(showThis && s.showOpen && !(this.inside && slim));
         if (s.open.alpha) this.updateOpen(s, dt, nowMs, night);
       }
     }
@@ -440,7 +474,7 @@ export class Building {
     const roofY = (a < 0 ? N * FLOOR_STEP : this.crownTop(a)) - SLAB + this.roofLift.x * DROP;
     this.roof.root.position.set(SHAFT_SHIFT_X, roofY, SHAFT_SHIFT_Z);
     this.roof.root.scale.set(SHAFT_SX, 1, SHAFT_SZ);
-    this.roof.setShown(true);
+    this.roof.setShown(!this.inside);
 
     this.cabinY.step(dt);
     this.shaftTop.step(dt);
@@ -451,8 +485,35 @@ export class Building {
     const bottom = -SLAB, top = Math.max(bottom + 0.1, this.shaftTop.x);
     this.shaft.root.position.y = bottom + drop;
     this.shaft.root.scale.y = (top - bottom) / this.shaftH;
+    this.shaft.root.visible = !this.inside;
+    this.cabin.root.visible = !this.inside;
+    this.placeGlow(roofY, nowMs);
+    if (this.room) this.placeRoom(a);
 
     this.updateNightMaps(nowMs);
+  }
+
+  placeRoom(a) {
+    const s = this.slots[a];
+    const sky = !!(this.inside && s && String(s.id).startsWith('hq-sky'));
+    this.room.visible = sky;
+    if (!sky) return;
+    const y = this.plateY(a, a) + s.lift.x * DROP;
+    this.room.position.set(SHAFT_SHIFT_X, y, SHAFT_SHIFT_Z);
+    this.room.userData.setRoof?.(s.id === 'hq-sky-roof');
+    if (this.room.userData.floorId !== s.id) tagFloor(this.room, s.id);
+  }
+
+  placeGlow(roofY, nowMs) {
+    if (!this.glow) return;
+    this.glow.visible = !this.inside && roofY > 1;
+    if (!this.glow.visible) return;
+    const y0 = -0.45, y1 = roofY + 0.6;
+    const x0 = -8.6, x1 = 10.3, z0 = -6.4, z1 = 6.4;
+    this.glow.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    this.glow.scale.set(x1 - x0, y1 - y0, z1 - z0);
+    const pulse = REDUCED ? 1 : 0.82 + 0.18 * Math.sin(nowMs * 0.0011);
+    this.glowShell.material.opacity = 0.45 * pulse;
   }
 
   updateOpen(slot, dt, nowMs, night) {
@@ -467,4 +528,44 @@ export class Building {
     });
     inst.walls?.tick(nowMs, night);
   }
+}
+
+function tagFloor(root, id) {
+  root.traverse((o) => { o.userData.floorId = id; });
+}
+
+function makeGlow() {
+  const group = new THREE.Group();
+  group.name = 'neon';
+  const shellMat = new THREE.MeshBasicMaterial({
+    color: 0xff1438,
+    transparent: true,
+    opacity: 0.34,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.BackSide,
+  });
+  const shell = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shellMat);
+  shell.scale.setScalar(1.06);
+  shell.raycast = () => {};
+  const edgeMat = new THREE.MeshBasicMaterial({ color: 0xff2048 });
+  const t = 0.018;
+  const bar = (w, h, d, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), edgeMat);
+    m.position.set(x, y, z);
+    m.raycast = () => {};
+    return m;
+  };
+  // A unit cage (-0.5..0.5). The group is scaled to the tower, so these stay a bright rim.
+  const posts = [
+    bar(t, 1, t, -0.5, 0, -0.5), bar(t, 1, t, 0.5, 0, -0.5),
+    bar(t, 1, t, -0.5, 0, 0.5), bar(t, 1, t, 0.5, 0, 0.5),
+    bar(1, t, t, 0, 0.5, -0.5), bar(1, t, t, 0, 0.5, 0.5),
+    bar(t, t, 1, -0.5, 0.5, 0), bar(t, t, 1, 0.5, 0.5, 0),
+    bar(1, t, t, 0, -0.5, -0.5), bar(1, t, t, 0, -0.5, 0.5),
+    bar(t, t, 1, -0.5, -0.5, 0), bar(t, t, 1, 0.5, -0.5, 0),
+  ];
+  group.add(shell, ...posts);
+  group.userData.shell = shell;
+  return group;
 }
